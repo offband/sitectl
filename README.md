@@ -42,6 +42,12 @@ and against a private build artifact.
 When you point `sitectl` at a folder, it reads local files only. When you point it at a URL,
 it crawls same-origin pages and blocks external navigation.
 
+## Responsible Use
+
+Only run `sitectl` against sites, systems, and build artifacts you own or are authorized to
+test. Even though `sitectl` is designed to be conservative and same-origin by default, it
+still performs automated crawling and HTTP requests when pointed at a URL.
+
 ## Install
 
 The recommended install path matches the other Offband Python CLI tools:
