@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import json
+from dataclasses import asdict
+from pathlib import Path
+from typing import Annotated
+
+import typer
+
+from sitectl.audit import run_audit
+from sitectl.config import SiteConfig, load_config
+from sitectl.crawler import crawl, fetch_text
+from sitectl.models import Finding
+from sitectl.reporting import (
+    crawl_to_dict,
+    exit_code,
+    print_audit,
+    print_crawl,
+    print_findings,
+    write_json,
+)
+from sitectl.robots import read_robots, validate_robots_text
+from sitectl.sitemap import generate_sitemap, read_sitemap, validate_sitemap_text
+
+app = typer.Typer(help="Local-first site hygiene CLI.")
+sitemap_app = typer.Typer(help="Generate and validate sitemaps.")
+robots_app = typer.Typer(help="Validate robots.txt files.")
+links_app = typer.Typer(help="Check internal links.")
+app.add_typer(sitemap_app, name="sitemap")
+app.add_typer(robots_app, name="robots")
+app.add_typer(links_app, name="links")
+
+
+ConfigOpt = Annotated[Path | None, typer.Option("--config", help="Optional sitectl.toml path.")]
+BaseUrlOpt = Annotated[
+    str | None, typer.Option("--base-url", help="Base URL for local folder targets.")
+]
+OutputOpt = Annotated[
+    str | None, typer.Option("--output", "-o", help="Write JSON or artifact output path.")
+]
+JsonOpt = Annotated[bool, typer.Option("--json", help="Emit JSON to stdout.")]
+
+
+@app.command(name="crawl")
+def crawl_cmd(
+    target: Annotated[str, typer.Argument(help="Local folder or HTTP URL to crawl.")],
+    config: ConfigOpt = None,
+    base_url: BaseUrlOpt = None,
+    output: OutputOpt = None,
+    json_output: JsonOpt = False,
+) -> None:
+    """Crawl a local folder or HTTP target."""
+    cfg = _merge(load_config(config), base_url=base_url, output=output)
+    result = crawl(target, cfg, cfg.base_url)
+    data = crawl_to_dict(result)
+    if output or json_output:
+        write_json(data, output)
+    else:
+        print_crawl(result)
+    raise typer.Exit(1 if result.errors else 0)
+
+
+@sitemap_app.command("generate")
+def sitemap_generate(
+    target: Annotated[str, typer.Argument(help="Local folder or HTTP URL to crawl.")],
+    base_url: Annotated[str, typer.Option("--base-url", help="Required for local folder targets.")],
+    config: ConfigOpt = None,
+    output: Annotated[
+        str | None, typer.Option("--output", "-o", help="Write sitemap XML path.")
+    ] = None,
+) -> None:
+    """Generate sitemap XML from discovered pages."""
+    cfg = _merge(load_config(config), base_url=base_url)
+    result = crawl(target, cfg, cfg.base_url)
+    xml = generate_sitemap(result)
+    if output:
+        Path(output).write_text(xml + "\n")
+    else:
+        typer.echo(xml)
+    raise typer.Exit(1 if result.errors else 0)
+
+
+@sitemap_app.command("validate")
+def sitemap_validate(
+    source: Annotated[str, typer.Argument(help="Sitemap file path or HTTP URL.")],
+    config: ConfigOpt = None,
+) -> None:
+    """Validate a sitemap file or URL."""
+    text = _read_source(source, load_config(config))
+    findings = validate_sitemap_text(text, source)
+    print_findings(findings)
+    raise typer.Exit(exit_code(findings))
+
+
+@robots_app.command("validate")
+def robots_validate(
+    source: Annotated[str, typer.Argument(help="robots.txt file path or HTTP URL.")],
+    config: ConfigOpt = None,
+) -> None:
+    """Validate a robots.txt file or URL."""
+    text = _read_source(source, load_config(config), robots=True)
+    findings = validate_robots_text(text, source)
+    print_findings(findings)
+    raise typer.Exit(exit_code(findings))
+
+
+@links_app.command("check")
+def links_check(
+    target: Annotated[str, typer.Argument(help="Local folder or HTTP URL to crawl.")],
+    config: ConfigOpt = None,
+    base_url: BaseUrlOpt = None,
+    output: OutputOpt = None,
+) -> None:
+    """Check internal links and anchors."""
+    from sitectl.links import check_links
+
+    cfg = _merge(load_config(config), base_url=base_url, output=output)
+    result = crawl(target, cfg, cfg.base_url)
+    findings = check_links(result)
+    if output:
+        write_json({"findings": [asdict(finding) for finding in findings]}, output)
+    else:
+        print_findings(findings)
+    raise typer.Exit(exit_code(findings))
+
+
+@app.command()
+def audit(
+    target: Annotated[str, typer.Argument(help="Local folder or HTTP URL to audit.")],
+    config: ConfigOpt = None,
+    base_url: BaseUrlOpt = None,
+    output: OutputOpt = None,
+    json_output: JsonOpt = False,
+) -> None:
+    """Run the v1 site hygiene audit."""
+    cfg = _merge(load_config(config), base_url=base_url, output=output)
+    report = run_audit(target, cfg, cfg.base_url)
+    if output or json_output:
+        write_json(report.to_dict(), output)
+    else:
+        print_audit(report)
+    raise typer.Exit(exit_code(report.findings))
+
+
+@app.command()
+def report(
+    audit_json: Annotated[Path, typer.Argument(help="Audit JSON file produced by sitectl audit.")],
+) -> None:
+    """Render a terminal summary from audit JSON."""
+    data = json.loads(audit_json.read_text())
+    findings = [Finding(**finding) for finding in data.get("findings", [])]
+    print_findings(findings)
+
+
+def _read_source(source: str, config: SiteConfig, robots: bool = False) -> str:
+    if source.startswith(("http://", "https://")):
+        return fetch_text(source, config)
+    return read_robots(source) if robots else read_sitemap(source)
+
+
+def _merge(
+    config: SiteConfig,
+    *,
+    base_url: str | None = None,
+    output: str | None = None,
+) -> SiteConfig:
+    return SiteConfig(
+        base_url=base_url or config.base_url,
+        excludes=config.excludes,
+        max_depth=config.max_depth,
+        timeout=config.timeout,
+        user_agent=config.user_agent,
+        output=output or config.output,
+        privacy=config.privacy,
+    )
+
+
+def main() -> None:
+    app()

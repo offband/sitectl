@@ -1,0 +1,22 @@
+.venv/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+coverage.xml
+.coverage
+*.pyc
+audit.json
+sitemap.xml
