@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-DEFAULT_EXCLUDES = ("/cdn-cgi/*", "*/cdn-cgi/*")
+DEFAULT_EXCLUDES = ("/cdn-cgi/*", "*/cdn-cgi/*", "404.html", "*/404.html")
 GLOBAL_CONFIG = Path("~/.sitectl/config.toml")
 LOCAL_CONFIG = Path("sitectl.toml")
 DEFAULT_CONFIG_TEXT = """# Starter sitectl config.
@@ -18,7 +18,8 @@ timeout = 10
 user_agent = "sitectl/0.1 local-first"
 privacy = "strict"
 
-# These are appended to sitectl's built-in safety excludes, which include /cdn-cgi/*.
+# These are appended to sitectl's built-in safety excludes, which include
+# /cdn-cgi/* and 404.html.
 excludes = [
   "admin/*",
   "*.draft.html",

@@ -117,6 +117,16 @@ Audit a static build folder:
 sitectl audit ./dist --base-url https://example.com
 ```
 
+For local folder sitemaps, run from the folder that represents the web root, or pass that
+folder directly. If your site lives at `~/Sites/example.com`, use:
+
+```bash
+sitectl sitemap generate ~/Sites/example.com --base-url https://example.com --output sitemap.xml
+```
+
+Running from the parent folder, such as `~/Sites`, will include the child folder name in
+generated URLs.
+
 Write a JSON audit report:
 
 ```bash

@@ -26,6 +26,19 @@ def test_local_crawl_maps_index_urls_and_blocks_external() -> None:
     assert result.network.requests == 0
 
 
+def test_default_excludes_skip_404_pages(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text("<title>Home</title>")
+    (site / "404.html").write_text("<title>Missing</title>")
+
+    result = crawl(str(site), SiteConfig(), "https://example.test")
+    xml = generate_sitemap(result)
+
+    assert [page.url for page in result.pages] == ["https://example.test"]
+    assert "https://example.test/404" not in xml
+
+
 def test_default_excludes_ignore_cloudflare_utility_links(tmp_path: Path) -> None:
     site = tmp_path / "site"
     site.mkdir()
