@@ -1,0 +1,18 @@
+# Starter sitectl config.
+#
+# Personal defaults live at ~/.sitectl/config.toml.
+# Project defaults can live at ./sitectl.toml.
+
+max_depth = 3
+timeout = 10
+user_agent = "sitectl/0.1 local-first"
+privacy = "strict"
+
+# These are appended to sitectl's built-in safety excludes, which include /cdn-cgi/*.
+excludes = [
+  "admin/*",
+  "*.draft.html",
+]
+
+# Usually better in a project sitectl.toml than in ~/.sitectl/config.toml.
+# base_url = "https://example.com"

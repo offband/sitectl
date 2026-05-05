@@ -8,7 +8,14 @@ from typing import Annotated
 import typer
 
 from sitectl.audit import run_audit
-from sitectl.config import SiteConfig, load_config
+from sitectl.config import (
+    SiteConfig,
+    default_config_path,
+    dump_default_config,
+    dump_resolved_config,
+    load_config,
+    resolved_config_paths,
+)
 from sitectl.crawler import crawl, fetch_text
 from sitectl.models import Finding
 from sitectl.reporting import (
@@ -26,12 +33,14 @@ app = typer.Typer(help="Local-first site hygiene CLI.")
 sitemap_app = typer.Typer(help="Generate and validate sitemaps.")
 robots_app = typer.Typer(help="Validate robots.txt files.")
 links_app = typer.Typer(help="Check internal links.")
+config_app = typer.Typer(help="Manage sitectl config files.")
 app.add_typer(sitemap_app, name="sitemap")
 app.add_typer(robots_app, name="robots")
 app.add_typer(links_app, name="links")
+app.add_typer(config_app, name="config")
 
 
-ConfigOpt = Annotated[Path | None, typer.Option("--config", help="Optional sitectl.toml path.")]
+ConfigOpt = Annotated[Path | None, typer.Option("--config", help="Optional config TOML path.")]
 BaseUrlOpt = Annotated[
     str | None, typer.Option("--base-url", help="Base URL for local folder targets.")
 ]
@@ -150,6 +159,62 @@ def report(
     data = json.loads(audit_json.read_text())
     findings = [Finding(**finding) for finding in data.get("findings", [])]
     print_findings(findings)
+
+
+@config_app.command("path")
+def config_path(
+    config: ConfigOpt = None,
+) -> None:
+    """Print resolved config file paths."""
+    paths = resolved_config_paths(config)
+    if paths:
+        for path in paths:
+            typer.echo(path)
+    else:
+        typer.echo(default_config_path())
+
+
+@config_app.command("init")
+def config_init(
+    config: ConfigOpt = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite an existing config file.")
+    ] = False,
+    stdout: Annotated[
+        bool, typer.Option("--stdout", help="Print config instead of writing it.")
+    ] = False,
+) -> None:
+    """Write or print a starter config."""
+    content = dump_default_config()
+    if stdout:
+        typer.echo(content, nl=False)
+        return
+    target = config or default_config_path()
+    if target.exists() and not force:
+        raise typer.BadParameter(f"config file already exists at {target}; use --force")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content)
+    typer.echo(f"Wrote {target}")
+
+
+@config_app.command("show")
+def config_show(
+    config: ConfigOpt = None,
+    resolved: Annotated[bool, typer.Option("--resolved", help="Print merged config.")] = False,
+) -> None:
+    """Print raw or resolved config."""
+    if resolved:
+        typer.echo(json.dumps(dump_resolved_config(load_config(config)), indent=2, sort_keys=True))
+        return
+    paths = resolved_config_paths(config)
+    if not paths:
+        typer.echo(dump_default_config(), nl=False)
+        return
+    for index, path in enumerate(paths):
+        if index:
+            typer.echo()
+        typer.echo(f"# {path}")
+        typer.echo(path.read_text(), nl=False)
 
 
 def _read_source(source: str, config: SiteConfig, robots: bool = False) -> str:

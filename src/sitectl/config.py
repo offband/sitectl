@@ -1,12 +1,32 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 DEFAULT_EXCLUDES = ("/cdn-cgi/*", "*/cdn-cgi/*")
-GLOBAL_CONFIG = Path("~/.sitectl")
+GLOBAL_CONFIG = Path("~/.sitectl/config.toml")
 LOCAL_CONFIG = Path("sitectl.toml")
+DEFAULT_CONFIG_TEXT = """# Starter sitectl config.
+#
+# Personal defaults live at ~/.sitectl/config.toml.
+# Project defaults can live at ./sitectl.toml.
+
+max_depth = 3
+timeout = 10
+user_agent = "sitectl/0.1 local-first"
+privacy = "strict"
+
+# These are appended to sitectl's built-in safety excludes, which include /cdn-cgi/*.
+excludes = [
+  "admin/*",
+  "*.draft.html",
+]
+
+# Usually better in a project sitectl.toml than in ~/.sitectl/config.toml.
+# base_url = "https://example.com"
+"""
 
 
 @dataclass(frozen=True)
@@ -26,6 +46,28 @@ def load_config(path: Path | None = None) -> SiteConfig:
         if config_path.exists():
             config = _merge_config(config, _read_raw_config(config_path))
     return config
+
+
+def default_config_path() -> Path:
+    return GLOBAL_CONFIG.expanduser()
+
+
+def config_search_paths(path: Path | None = None) -> tuple[Path, ...]:
+    return _config_paths(path)
+
+
+def resolved_config_paths(path: Path | None = None) -> tuple[Path, ...]:
+    return tuple(candidate for candidate in config_search_paths(path) if candidate.exists())
+
+
+def dump_default_config() -> str:
+    return DEFAULT_CONFIG_TEXT
+
+
+def dump_resolved_config(config: SiteConfig) -> dict[str, Any]:
+    data = asdict(config)
+    data["excludes"] = list(config.excludes)
+    return data
 
 
 def _config_paths(path: Path | None) -> tuple[Path, ...]:

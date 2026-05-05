@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from sitectl.audit import run_audit
 from sitectl.cli import app
-from sitectl.config import DEFAULT_EXCLUDES, SiteConfig, load_config
+from sitectl.config import DEFAULT_EXCLUDES, SiteConfig, default_config_path, load_config
 from sitectl.crawler import crawl
 from sitectl.robots import validate_robots_text
 from sitectl.security import redact, scan_pages
@@ -64,7 +64,9 @@ def test_robots_validation() -> None:
 def test_config_loading(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".sitectl").write_text('timeout = 2\nexcludes = ["global/*"]\n')
+    config_dir = home / ".sitectl"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text('timeout = 2\nexcludes = ["global/*"]\n')
     monkeypatch.setenv("HOME", str(home))
     config_path = tmp_path / "sitectl.toml"
     config_path.write_text(
@@ -77,6 +79,7 @@ def test_config_loading(tmp_path: Path, monkeypatch) -> None:
     assert config.max_depth == 1
     assert config.timeout == 2
     assert config.excludes == (*DEFAULT_EXCLUDES, "global/*", "admin/*")
+    assert default_config_path() == config_dir / "config.toml"
 
 
 def test_secret_redaction() -> None:
@@ -115,3 +118,21 @@ def test_cli_help_and_audit_json(tmp_path: Path) -> None:
     data = json.loads(output.read_text())
     assert data["pages_scanned"] == 2
     assert data["network"]["requests"] == 0
+
+
+def test_config_cli_commands(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    runner = CliRunner()
+
+    init_result = runner.invoke(app, ["config", "init"])
+    show_result = runner.invoke(app, ["config", "show", "--resolved"])
+    stdout_result = runner.invoke(app, ["config", "init", "--stdout"])
+
+    assert init_result.exit_code == 0
+    assert (home / ".sitectl" / "config.toml").exists()
+    assert show_result.exit_code == 0
+    assert '"privacy": "strict"' in show_result.output
+    assert stdout_result.exit_code == 0
+    assert "max_depth = 3" in stdout_result.output

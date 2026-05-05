@@ -42,12 +42,40 @@ and against a private build artifact.
 When you point `sitectl` at a folder, it reads local files only. When you point it at a URL,
 it crawls same-origin pages and blocks external navigation.
 
+## Install
+
+The recommended install path matches the other Offband Python CLI tools:
+
+```bash
+brew install pipx
+pipx ensurepath
+pipx install git+https://github.com/offband/sitectl.git
+```
+
+After installing, restart your shell if `pipx ensurepath` asks you to, then run:
+
+```bash
+sitectl --help
+```
+
+Upgrade from GitHub:
+
+```bash
+pipx upgrade sitectl
+```
+
+Uninstall:
+
+```bash
+pipx uninstall sitectl
+```
+
 ## Install For Development
 
 This repo uses [`uv`](https://github.com/astral-sh/uv).
 
 ```bash
-git clone <your-remote-url> sitectl
+git clone https://github.com/offband/sitectl.git
 cd sitectl
 uv sync --extra dev
 ```
@@ -70,20 +98,20 @@ uv run sitectl --help
 Audit a static build folder:
 
 ```bash
-uv run sitectl audit ./dist --base-url https://example.com
+sitectl audit ./dist --base-url https://example.com
 ```
 
 Write a JSON audit report:
 
 ```bash
-uv run sitectl audit ./dist --base-url https://example.com --output audit.json
-uv run sitectl report audit.json
+sitectl audit ./dist --base-url https://example.com --output audit.json
+sitectl report audit.json
 ```
 
 Generate a sitemap:
 
 ```bash
-uv run sitectl sitemap generate ./dist \
+sitectl sitemap generate ./dist \
   --base-url https://example.com \
   --output sitemap.xml
 ```
@@ -91,20 +119,20 @@ uv run sitectl sitemap generate ./dist \
 Validate existing discovery files:
 
 ```bash
-uv run sitectl sitemap validate ./dist/sitemap.xml
-uv run sitectl robots validate ./dist/robots.txt
+sitectl sitemap validate ./dist/sitemap.xml
+sitectl robots validate ./dist/robots.txt
 ```
 
 Check internal links:
 
 ```bash
-uv run sitectl links check ./dist --base-url https://example.com
+sitectl links check ./dist --base-url https://example.com
 ```
 
 Audit a local dev server:
 
 ```bash
-uv run sitectl audit http://localhost:3000
+sitectl audit http://localhost:3000
 ```
 
 ## Commands
@@ -118,19 +146,34 @@ uv run sitectl audit http://localhost:3000
 | `sitectl sitemap validate FILE_OR_URL` | Validate sitemap XML. |
 | `sitectl robots validate FILE_OR_URL` | Validate `robots.txt`. |
 | `sitectl links check TARGET` | Check internal links and anchors. |
+| `sitectl config path` | Print resolved config file paths. |
+| `sitectl config init` | Write a starter config to `~/.sitectl/config.toml`. |
+| `sitectl config show` | Print raw or resolved config. |
 
 `TARGET` can be a local folder or an `http://` / `https://` URL.
 
 ## Configuration
 
-Every command works with flags. For personal defaults across projects, copy the example
-config to `~/.sitectl`:
+Every command works with flags. For personal defaults across projects, initialize a global
+config:
 
 ```bash
-cp .sitectl.example ~/.sitectl
+sitectl config init
 ```
 
-For repeatable project defaults, add `sitectl.toml`:
+That writes:
+
+```text
+~/.sitectl/config.toml
+```
+
+You can also print the starter config:
+
+```bash
+sitectl config init --stdout
+```
+
+For repeatable project defaults, add `sitectl.toml` to a repo:
 
 ```toml
 base_url = "https://example.com"
@@ -144,17 +187,25 @@ privacy = "strict"
 Config precedence is:
 
 ```text
-built-in defaults < ~/.sitectl < sitectl.toml or --config < CLI flags
+built-in defaults < ~/.sitectl/config.toml < sitectl.toml or --config < CLI flags
 ```
 
 Use a project config explicitly with:
 
 ```bash
-uv run sitectl audit ./dist --config sitectl.toml
+sitectl audit ./dist --config sitectl.toml
 ```
 
 CLI flags override config values. User-defined `excludes` are appended to built-in safety
 excludes such as `/cdn-cgi/*`.
+
+Inspect config:
+
+```bash
+sitectl config path
+sitectl config show
+sitectl config show --resolved
+```
 
 ## Exit Codes
 
@@ -175,7 +226,6 @@ Planned next improvements:
 
 - GitHub Actions workflow
 - HTTP fixture test coverage
-- `sitectl config show` and `sitectl config init`
 - Configurable CI strictness with `--fail-on warning|error`
 - Richer terminal summaries for JSON reports
 
