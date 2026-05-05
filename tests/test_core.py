@@ -114,10 +114,21 @@ def test_cli_help_and_audit_json(tmp_path: Path) -> None:
     )
 
     assert help_result.exit_code == 0
+    assert "sitectl crawl https://example.com" in help_result.output
+    assert "sitectl crawl ./dist --base-url https://example.com" in help_result.output
     assert audit_result.exit_code == 1
     data = json.loads(output.read_text())
     assert data["pages_scanned"] == 2
     assert data["network"]["requests"] == 0
+
+
+def test_cli_explains_base_url_without_target() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["crawl", "--base-url", "https://offband.dev"])
+
+    assert result.exit_code == 2
+    assert "sitectl crawl https://offband.dev" in result.output
+    assert "--base-url is only for local folder targets" in result.output
 
 
 def test_config_cli_commands(tmp_path: Path, monkeypatch) -> None:

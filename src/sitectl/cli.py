@@ -52,13 +52,20 @@ JsonOpt = Annotated[bool, typer.Option("--json", help="Emit JSON to stdout.")]
 
 @app.command(name="crawl")
 def crawl_cmd(
-    target: Annotated[str, typer.Argument(help="Local folder or HTTP URL to crawl.")],
+    target: Annotated[str | None, typer.Argument(help="Local folder or HTTP URL to crawl.")] = None,
     config: ConfigOpt = None,
     base_url: BaseUrlOpt = None,
     output: OutputOpt = None,
     json_output: JsonOpt = False,
 ) -> None:
-    """Crawl a local folder or HTTP target."""
+    """Crawl a local folder or HTTP target.
+
+    Examples:
+
+      sitectl crawl https://example.com
+      sitectl crawl ./dist --base-url https://example.com
+    """
+    target = _require_target(target, base_url, "crawl")
     cfg = _merge(load_config(config), base_url=base_url, output=output)
     result = crawl(target, cfg, cfg.base_url)
     data = crawl_to_dict(result)
@@ -71,14 +78,24 @@ def crawl_cmd(
 
 @sitemap_app.command("generate")
 def sitemap_generate(
-    target: Annotated[str, typer.Argument(help="Local folder or HTTP URL to crawl.")],
-    base_url: Annotated[str, typer.Option("--base-url", help="Required for local folder targets.")],
+    target: Annotated[str | None, typer.Argument(help="Local folder or HTTP URL to crawl.")] = None,
+    base_url: Annotated[
+        str | None,
+        typer.Option("--base-url", help="Required when TARGET is a local folder."),
+    ] = None,
     config: ConfigOpt = None,
     output: Annotated[
         str | None, typer.Option("--output", "-o", help="Write sitemap XML path.")
     ] = None,
 ) -> None:
-    """Generate sitemap XML from discovered pages."""
+    """Generate sitemap XML from discovered pages.
+
+    Examples:
+
+      sitectl sitemap generate ./dist --base-url https://example.com
+      sitectl sitemap generate https://example.com
+    """
+    target = _require_target(target, base_url, "sitemap generate")
     cfg = _merge(load_config(config), base_url=base_url)
     result = crawl(target, cfg, cfg.base_url)
     xml = generate_sitemap(result)
@@ -115,14 +132,21 @@ def robots_validate(
 
 @links_app.command("check")
 def links_check(
-    target: Annotated[str, typer.Argument(help="Local folder or HTTP URL to crawl.")],
+    target: Annotated[str | None, typer.Argument(help="Local folder or HTTP URL to crawl.")] = None,
     config: ConfigOpt = None,
     base_url: BaseUrlOpt = None,
     output: OutputOpt = None,
 ) -> None:
-    """Check internal links and anchors."""
+    """Check internal links and anchors.
+
+    Examples:
+
+      sitectl links check https://example.com
+      sitectl links check ./dist --base-url https://example.com
+    """
     from sitectl.links import check_links
 
+    target = _require_target(target, base_url, "links check")
     cfg = _merge(load_config(config), base_url=base_url, output=output)
     result = crawl(target, cfg, cfg.base_url)
     findings = check_links(result)
@@ -135,13 +159,20 @@ def links_check(
 
 @app.command()
 def audit(
-    target: Annotated[str, typer.Argument(help="Local folder or HTTP URL to audit.")],
+    target: Annotated[str | None, typer.Argument(help="Local folder or HTTP URL to audit.")] = None,
     config: ConfigOpt = None,
     base_url: BaseUrlOpt = None,
     output: OutputOpt = None,
     json_output: JsonOpt = False,
 ) -> None:
-    """Run the v1 site hygiene audit."""
+    """Run the v1 site hygiene audit.
+
+    Examples:
+
+      sitectl audit https://example.com
+      sitectl audit ./dist --base-url https://example.com
+    """
+    target = _require_target(target, base_url, "audit")
     cfg = _merge(load_config(config), base_url=base_url, output=output)
     report = run_audit(target, cfg, cfg.base_url)
     if output or json_output:
@@ -221,6 +252,30 @@ def _read_source(source: str, config: SiteConfig, robots: bool = False) -> str:
     if source.startswith(("http://", "https://")):
         return fetch_text(source, config)
     return read_robots(source) if robots else read_sitemap(source)
+
+
+def _require_target(target: str | None, base_url: str | None, command: str) -> str:
+    if target:
+        return target
+    if base_url and base_url.startswith(("http://", "https://")):
+        typer.secho(
+            f"Missing TARGET. For a live site, put the URL after the command:\n\n"
+            f"  sitectl {command} {base_url}\n\n"
+            "--base-url is only for local folder targets, for example:\n\n"
+            f"  sitectl {command} ./dist --base-url {base_url}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+    else:
+        typer.secho(
+            f"Missing TARGET.\n\n"
+            f"Examples:\n"
+            f"  sitectl {command} https://example.com\n"
+            f"  sitectl {command} ./dist --base-url https://example.com",
+            fg=typer.colors.RED,
+            err=True,
+        )
+    raise typer.Exit(2)
 
 
 def _merge(

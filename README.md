@@ -101,6 +101,16 @@ uv run sitectl --help
 
 ## Quickstart
 
+For a live or local HTTP site, put the URL directly after the command:
+
+```bash
+sitectl crawl https://example.com
+sitectl audit https://example.com
+```
+
+Use `--base-url` only when the target is a local folder and `sitectl` needs to map files
+to public URLs.
+
 Audit a static build folder:
 
 ```bash
