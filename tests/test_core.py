@@ -45,6 +45,8 @@ def test_sitemap_generate_and_validate() -> None:
     xml = generate_sitemap(result)
 
     assert "https://example.test/about" in xml
+    assert "\n  <url>" in xml
+    assert "\n    <loc>https://example.test/about</loc>" in xml
     assert validate_sitemap_text(xml) == []
     assert validate_sitemap_text("<nope>")[0].code == "sitemap.invalid_xml"
 

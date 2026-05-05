@@ -16,6 +16,7 @@ def generate_sitemap(result: CrawlResult) -> str:
         item = ET.SubElement(root, f"{{{NS}}}url")
         loc = ET.SubElement(item, f"{{{NS}}}loc")
         loc.text = page.url
+    ET.indent(root, space="  ")
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 
