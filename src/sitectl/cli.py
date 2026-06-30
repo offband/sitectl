@@ -69,8 +69,8 @@ def crawl_cmd(
     cfg = _merge(load_config(config), base_url=base_url, output=output)
     result = crawl(target, cfg, cfg.base_url)
     data = crawl_to_dict(result)
-    if output or json_output:
-        write_json(data, output)
+    if cfg.output or json_output:
+        write_json(data, cfg.output)
     else:
         print_crawl(result)
     raise typer.Exit(1 if result.errors else 0)
@@ -150,8 +150,8 @@ def links_check(
     cfg = _merge(load_config(config), base_url=base_url, output=output)
     result = crawl(target, cfg, cfg.base_url)
     findings = check_links(result)
-    if output:
-        write_json({"findings": [asdict(finding) for finding in findings]}, output)
+    if cfg.output:
+        write_json({"findings": [asdict(finding) for finding in findings]}, cfg.output)
     else:
         print_findings(findings)
     raise typer.Exit(exit_code(findings))
@@ -175,8 +175,8 @@ def audit(
     target = _require_target(target, base_url, "audit")
     cfg = _merge(load_config(config), base_url=base_url, output=output)
     report = run_audit(target, cfg, cfg.base_url)
-    if output or json_output:
-        write_json(report.to_dict(), output)
+    if cfg.output or json_output:
+        write_json(report.to_dict(), cfg.output)
     else:
         print_audit(report)
     raise typer.Exit(exit_code(report.findings))
@@ -190,6 +190,7 @@ def report(
     data = json.loads(audit_json.read_text())
     findings = [Finding(**finding) for finding in data.get("findings", [])]
     print_findings(findings)
+    raise typer.Exit(exit_code(findings))
 
 
 @config_app.command("path")

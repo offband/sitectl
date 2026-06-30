@@ -137,6 +137,49 @@ def test_cli_help_and_audit_json(tmp_path: Path) -> None:
     assert data["network"]["requests"] == 0
 
 
+def test_cli_uses_configured_output_path(tmp_path: Path) -> None:
+    runner = CliRunner()
+    output = tmp_path / "crawl.json"
+    config = tmp_path / "sitectl.toml"
+    config.write_text(
+        f'base_url = "https://example.test"\noutput = "{output.as_posix()}"\n',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["crawl", str(FIXTURE), "--config", str(config)])
+
+    assert result.exit_code == 0
+    data = json.loads(output.read_text())
+    assert data["base_url"] == "https://example.test"
+    assert len(data["pages"]) == 2
+
+
+def test_report_exits_nonzero_for_error_findings(tmp_path: Path) -> None:
+    runner = CliRunner()
+    audit_json = tmp_path / "audit.json"
+    audit_json.write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "severity": "error",
+                        "code": "link.broken_internal",
+                        "message": "Broken internal link",
+                        "location": "index.html",
+                        "evidence": "/missing",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["report", str(audit_json)])
+
+    assert result.exit_code == 1
+    assert "link.broken_internal" in result.output
+
+
 def test_cli_explains_base_url_without_target() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["crawl", "--base-url", "https://offband.dev"])
