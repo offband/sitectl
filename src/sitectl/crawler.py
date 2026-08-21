@@ -45,7 +45,7 @@ def crawl_directory(root: Path, config: SiteConfig, base_url: str) -> CrawlResul
         except OSError as exc:
             errors.append(f"{rel}: {exc}")
             continue
-        url = _file_url(base_url, rel)
+        url = _file_url(base_url, rel, config.section_origins or {}, config.trailing_slash_urls)
         parser = parse_page(url, body)
         pages.append(
             Page(
@@ -134,14 +134,25 @@ def _fetch(
         return response.status, headers, raw.decode(encoding, errors="replace")
 
 
-def _file_url(base_url: str, rel: Path) -> str:
+def _file_url(
+    base_url: str,
+    rel: Path,
+    section_origins: dict[str, str] | None = None,
+    trailing_slash: bool = False,
+) -> str:
     parts = list(rel.parts)
     if parts[-1] in {"index.html", "index.htm"}:
         parts = parts[:-1]
     elif parts[-1].endswith((".html", ".htm")):
         parts[-1] = Path(parts[-1]).stem
+    if parts and section_origins and parts[0] in section_origins:
+        base_url = section_origins[parts[0]]
+        parts = parts[1:]
     path = "/".join(parts)
-    return f"{base_url.rstrip('/')}/{path}".rstrip("/") or base_url.rstrip("/")
+    if not path:
+        return f"{base_url.rstrip('/')}/" if trailing_slash else base_url.rstrip("/")
+    url = f"{base_url.rstrip('/')}/{path}"
+    return f"{url}/" if trailing_slash else url
 
 
 def _normalize_url(url: str) -> str:

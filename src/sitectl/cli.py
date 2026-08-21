@@ -44,10 +44,20 @@ ConfigOpt = Annotated[Path | None, typer.Option("--config", help="Optional confi
 BaseUrlOpt = Annotated[
     str | None, typer.Option("--base-url", help="Base URL for local folder targets.")
 ]
+SectionOriginOpt = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--section-origin",
+        help="Map a local top-level folder to a canonical origin, e.g. blog=https://blog.example.com.",
+    ),
+]
 OutputOpt = Annotated[
     str | None, typer.Option("--output", "-o", help="Write JSON or artifact output path.")
 ]
 JsonOpt = Annotated[bool, typer.Option("--json", help="Emit JSON to stdout.")]
+TrailingSlashOpt = Annotated[
+    bool, typer.Option("--trailing-slash", help="Emit local page URLs with trailing slashes.")
+]
 
 
 @app.command(name="crawl")
@@ -55,6 +65,8 @@ def crawl_cmd(
     target: Annotated[str | None, typer.Argument(help="Local folder or HTTP URL to crawl.")] = None,
     config: ConfigOpt = None,
     base_url: BaseUrlOpt = None,
+    section_origin: SectionOriginOpt = None,
+    trailing_slash: TrailingSlashOpt = False,
     output: OutputOpt = None,
     json_output: JsonOpt = False,
 ) -> None:
@@ -66,7 +78,13 @@ def crawl_cmd(
       sitectl crawl ./dist --base-url https://example.com
     """
     target = _require_target(target, base_url, "crawl")
-    cfg = _merge(load_config(config), base_url=base_url, output=output)
+    cfg = _merge(
+        load_config(config),
+        base_url=base_url,
+        output=output,
+        section_origins=section_origin,
+        trailing_slash=trailing_slash,
+    )
     result = crawl(target, cfg, cfg.base_url)
     data = crawl_to_dict(result)
     if output or json_output:
@@ -84,9 +102,15 @@ def sitemap_generate(
         typer.Option("--base-url", help="Required when TARGET is a local folder."),
     ] = None,
     config: ConfigOpt = None,
+    section_origin: SectionOriginOpt = None,
+    trailing_slash: TrailingSlashOpt = False,
     output: Annotated[
         str | None, typer.Option("--output", "-o", help="Write sitemap XML path.")
     ] = None,
+    check: Annotated[
+        bool,
+        typer.Option("--check", help="Fail if the generated sitemap differs from the output file."),
+    ] = False,
 ) -> None:
     """Generate sitemap XML from discovered pages.
 
@@ -96,9 +120,30 @@ def sitemap_generate(
       sitectl sitemap generate https://example.com
     """
     target = _require_target(target, base_url, "sitemap generate")
-    cfg = _merge(load_config(config), base_url=base_url)
+    cfg = _merge(
+        load_config(config),
+        base_url=base_url,
+        section_origins=section_origin,
+        trailing_slash=trailing_slash,
+    )
     result = crawl(target, cfg, cfg.base_url)
     xml = generate_sitemap(result)
+    output_path = Path(output) if output else _default_sitemap_path(target)
+    if check:
+        if output_path is None:
+            raise typer.BadParameter("--check requires --output for HTTP targets")
+        existing = output_path.read_text() if output_path.exists() else ""
+        expected = xml + "\n"
+        if existing != expected:
+            typer.secho(
+                f"{output_path} is out of date. Run: sitectl sitemap generate {target} "
+                f"--base-url {cfg.base_url} --output {output_path}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(f"{output_path} is up to date.")
+        raise typer.Exit(1 if result.errors else 0)
     if output:
         Path(output).write_text(xml + "\n")
     else:
@@ -135,6 +180,8 @@ def links_check(
     target: Annotated[str | None, typer.Argument(help="Local folder or HTTP URL to crawl.")] = None,
     config: ConfigOpt = None,
     base_url: BaseUrlOpt = None,
+    section_origin: SectionOriginOpt = None,
+    trailing_slash: TrailingSlashOpt = False,
     output: OutputOpt = None,
 ) -> None:
     """Check internal links and anchors.
@@ -147,7 +194,13 @@ def links_check(
     from sitectl.links import check_links
 
     target = _require_target(target, base_url, "links check")
-    cfg = _merge(load_config(config), base_url=base_url, output=output)
+    cfg = _merge(
+        load_config(config),
+        base_url=base_url,
+        output=output,
+        section_origins=section_origin,
+        trailing_slash=trailing_slash,
+    )
     result = crawl(target, cfg, cfg.base_url)
     findings = check_links(result)
     if output:
@@ -162,6 +215,8 @@ def audit(
     target: Annotated[str | None, typer.Argument(help="Local folder or HTTP URL to audit.")] = None,
     config: ConfigOpt = None,
     base_url: BaseUrlOpt = None,
+    section_origin: SectionOriginOpt = None,
+    trailing_slash: TrailingSlashOpt = False,
     output: OutputOpt = None,
     json_output: JsonOpt = False,
 ) -> None:
@@ -173,7 +228,13 @@ def audit(
       sitectl audit ./dist --base-url https://example.com
     """
     target = _require_target(target, base_url, "audit")
-    cfg = _merge(load_config(config), base_url=base_url, output=output)
+    cfg = _merge(
+        load_config(config),
+        base_url=base_url,
+        output=output,
+        section_origins=section_origin,
+        trailing_slash=trailing_slash,
+    )
     report = run_audit(target, cfg, cfg.base_url)
     if output or json_output:
         write_json(report.to_dict(), output)
@@ -283,9 +344,15 @@ def _merge(
     *,
     base_url: str | None = None,
     output: str | None = None,
+    section_origins: list[str] | None = None,
+    trailing_slash: bool = False,
 ) -> SiteConfig:
+    merged_section_origins = dict(config.section_origins or {})
+    merged_section_origins.update(_parse_section_origins(section_origins or []))
     return SiteConfig(
         base_url=base_url or config.base_url,
+        section_origins=merged_section_origins or None,
+        trailing_slash_urls=trailing_slash or config.trailing_slash_urls,
         excludes=config.excludes,
         max_depth=config.max_depth,
         timeout=config.timeout,
@@ -293,6 +360,26 @@ def _merge(
         output=output or config.output,
         privacy=config.privacy,
     )
+
+
+def _parse_section_origins(values: list[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            raise typer.BadParameter("--section-origin must use NAME=https://host.example")
+        name, origin = value.split("=", 1)
+        name = name.strip().strip("/")
+        origin = origin.strip().rstrip("/")
+        if not name or not origin.startswith(("http://", "https://")):
+            raise typer.BadParameter("--section-origin must use NAME=https://host.example")
+        parsed[name] = origin
+    return parsed
+
+
+def _default_sitemap_path(target: str) -> Path | None:
+    if target.startswith(("http://", "https://")):
+        return None
+    return Path(target) / "sitemap.xml"
 
 
 def main() -> None:

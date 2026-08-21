@@ -17,7 +17,10 @@ def generate_sitemap(result: CrawlResult) -> str:
         loc = ET.SubElement(item, f"{{{NS}}}loc")
         loc.text = page.url
     ET.indent(root, space="  ")
-    return ET.tostring(root, encoding="unicode", xml_declaration=True)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        + ET.tostring(root, encoding="unicode", xml_declaration=False)
+    )
 
 
 def validate_sitemap_text(text: str, location: str = "sitemap") -> list[Finding]:

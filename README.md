@@ -142,6 +142,27 @@ sitectl sitemap generate ./dist \
   --output sitemap.xml
 ```
 
+Generate a sitemap for a static site whose local folders publish on canonical
+section subdomains:
+
+```bash
+sitectl sitemap generate ./dist \
+  --base-url https://example.com \
+  --trailing-slash \
+  --section-origin blog=https://blog.example.com \
+  --section-origin tools=https://tools.example.com \
+  --output sitemap.xml
+```
+
+Fail CI when the checked-in sitemap is stale:
+
+```bash
+sitectl sitemap generate ./dist \
+  --base-url https://example.com \
+  --output sitemap.xml \
+  --check
+```
+
 Validate existing discovery files:
 
 ```bash
@@ -208,6 +229,11 @@ timeout = 10
 user_agent = "sitectl/0.1 local-first"
 excludes = ["admin/*", "*.draft.html"]
 privacy = "strict"
+trailing_slash_urls = true
+
+[section_origins]
+blog = "https://blog.example.com"
+tools = "https://tools.example.com"
 ```
 
 Config precedence is:

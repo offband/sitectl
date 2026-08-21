@@ -64,6 +64,56 @@ def test_sitemap_generate_and_validate() -> None:
     assert validate_sitemap_text("<nope>")[0].code == "sitemap.invalid_xml"
 
 
+def test_sitemap_supports_section_origins(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    (site / "blog" / "post").mkdir(parents=True)
+    (site / "tools" / "sitectl").mkdir(parents=True)
+    (site / "index.html").write_text("<title>Home</title>", encoding="utf-8")
+    (site / "blog" / "index.html").write_text("<title>Blog</title>", encoding="utf-8")
+    (site / "blog" / "post" / "index.html").write_text("<title>Post</title>", encoding="utf-8")
+    (site / "tools" / "sitectl" / "index.html").write_text(
+        "<title>sitectl</title>", encoding="utf-8"
+    )
+
+    result = crawl(
+        str(site),
+        SiteConfig(
+            section_origins={
+                "blog": "https://blog.example.test",
+                "tools": "https://tools.example.test",
+            }
+        ),
+        "https://example.test",
+    )
+    xml = generate_sitemap(result)
+
+    assert "https://example.test" in xml
+    assert "https://blog.example.test" in xml
+    assert "https://blog.example.test/post" in xml
+    assert "https://tools.example.test/sitectl" in xml
+    assert "https://example.test/blog" not in xml
+
+
+def test_sitemap_supports_trailing_slash_urls(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    (site / "blog" / "post").mkdir(parents=True)
+    (site / "index.html").write_text("<title>Home</title>", encoding="utf-8")
+    (site / "blog" / "post" / "index.html").write_text("<title>Post</title>", encoding="utf-8")
+
+    result = crawl(
+        str(site),
+        SiteConfig(
+            section_origins={"blog": "https://blog.example.test"},
+            trailing_slash_urls=True,
+        ),
+        "https://example.test",
+    )
+    xml = generate_sitemap(result)
+
+    assert "https://example.test/" in xml
+    assert "https://blog.example.test/post/" in xml
+
+
 def test_robots_validation() -> None:
     assert validate_robots_text("User-agent: *\nDisallow: /admin\n") == []
 
@@ -85,7 +135,12 @@ def test_config_loading(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(home))
     config_path = tmp_path / "sitectl.toml"
     config_path.write_text(
-        'base_url = "https://example.test"\nmax_depth = 1\nexcludes = ["admin/*"]\n'
+        'base_url = "https://example.test"\n'
+        'max_depth = 1\n'
+        'trailing_slash_urls = true\n'
+        'excludes = ["admin/*"]\n'
+        '[section_origins]\n'
+        'blog = "https://blog.example.test/"\n'
     )
 
     config = load_config(config_path)
@@ -93,6 +148,8 @@ def test_config_loading(tmp_path: Path, monkeypatch) -> None:
     assert config.base_url == "https://example.test"
     assert config.max_depth == 1
     assert config.timeout == 2
+    assert config.section_origins == {"blog": "https://blog.example.test"}
+    assert config.trailing_slash_urls is True
     assert config.excludes == (*DEFAULT_EXCLUDES, "global/*", "admin/*")
     assert default_config_path() == config_dir / "config.toml"
 
@@ -144,6 +201,52 @@ def test_cli_explains_base_url_without_target() -> None:
     assert result.exit_code == 2
     assert "sitectl crawl https://offband.dev" in result.output
     assert "--base-url is only for local folder targets" in result.output
+
+
+def test_cli_sitemap_generate_check_with_section_origin(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    (site / "blog" / "post").mkdir(parents=True)
+    (site / "index.html").write_text("<title>Home</title>", encoding="utf-8")
+    (site / "blog" / "post" / "index.html").write_text("<title>Post</title>", encoding="utf-8")
+    sitemap = site / "sitemap.xml"
+    runner = CliRunner()
+
+    generate_result = runner.invoke(
+        app,
+        [
+            "sitemap",
+            "generate",
+            str(site),
+            "--base-url",
+            "https://example.test",
+            "--section-origin",
+            "blog=https://blog.example.test",
+            "--trailing-slash",
+            "--output",
+            str(sitemap),
+        ],
+    )
+    check_result = runner.invoke(
+        app,
+        [
+            "sitemap",
+            "generate",
+            str(site),
+            "--base-url",
+            "https://example.test",
+            "--section-origin",
+            "blog=https://blog.example.test",
+            "--trailing-slash",
+            "--output",
+            str(sitemap),
+            "--check",
+        ],
+    )
+
+    assert generate_result.exit_code == 0
+    assert check_result.exit_code == 0
+    assert "is up to date" in check_result.output
+    assert "https://blog.example.test/post/" in sitemap.read_text(encoding="utf-8")
 
 
 def test_config_cli_commands(tmp_path: Path, monkeypatch) -> None:

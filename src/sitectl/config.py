@@ -17,6 +17,7 @@ max_depth = 3
 timeout = 10
 user_agent = "sitectl/0.1 local-first"
 privacy = "strict"
+trailing_slash_urls = false
 
 # These are appended to sitectl's built-in safety excludes, which include
 # /cdn-cgi/* and 404.html.
@@ -27,12 +28,20 @@ excludes = [
 
 # Usually better in a project sitectl.toml than in ~/.sitectl/config.toml.
 # base_url = "https://example.com"
+
+# Optional canonical origins for section folders in a static site.
+# A page at ./blog/post/index.html becomes https://blog.example.com/post.
+# [section_origins]
+# blog = "https://blog.example.com"
+# docs = "https://docs.example.com"
 """
 
 
 @dataclass(frozen=True)
 class SiteConfig:
     base_url: str | None = None
+    section_origins: dict[str, str] | None = None
+    trailing_slash_urls: bool = False
     excludes: tuple[str, ...] = DEFAULT_EXCLUDES
     max_depth: int = 3
     timeout: float = 10.0
@@ -68,6 +77,7 @@ def dump_default_config() -> str:
 def dump_resolved_config(config: SiteConfig) -> dict[str, Any]:
     data = asdict(config)
     data["excludes"] = list(config.excludes)
+    data["section_origins"] = config.section_origins or {}
     return data
 
 
@@ -85,8 +95,15 @@ def _merge_config(config: SiteConfig, raw: dict) -> SiteConfig:
     excludes = config.excludes
     if "excludes" in raw:
         excludes = (*excludes, *tuple(raw["excludes"]))
+    section_origins = dict(config.section_origins or {})
+    if "section_origins" in raw:
+        section_origins.update(
+            {str(key): str(value).rstrip("/") for key, value in raw["section_origins"].items()}
+        )
     return SiteConfig(
         base_url=raw.get("base_url", config.base_url),
+        section_origins=section_origins or None,
+        trailing_slash_urls=bool(raw.get("trailing_slash_urls", config.trailing_slash_urls)),
         excludes=tuple(dict.fromkeys(excludes)),
         max_depth=int(raw.get("max_depth", config.max_depth)),
         timeout=float(raw.get("timeout", config.timeout)),
