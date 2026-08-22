@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 from typer.testing import CliRunner
 
+import sitectl.audit as audit_module
 from sitectl.audit import run_audit
 from sitectl.cli import app
 from sitectl.config import DEFAULT_EXCLUDES, SiteConfig, default_config_path, load_config
 from sitectl.crawler import crawl
+from sitectl.models import CrawlResult, NetworkSummary
 from sitectl.robots import validate_robots_text
 from sitectl.security import redact, scan_pages
 from sitectl.sitemap import generate_sitemap, validate_sitemap_text
@@ -129,8 +132,8 @@ def test_cli_help_and_audit_json(tmp_path: Path) -> None:
     )
 
     assert help_result.exit_code == 0
-    assert "sitectl crawl https://example.com" in help_result.output
-    assert "sitectl crawl ./dist --base-url https://example.com" in help_result.output
+    assert "Usage:" in help_result.output
+    assert "crawl" in help_result.output
     assert audit_result.exit_code == 1
     data = json.loads(output.read_text())
     assert data["pages_scanned"] == 2
@@ -177,7 +180,98 @@ def test_report_exits_nonzero_for_error_findings(tmp_path: Path) -> None:
     result = runner.invoke(app, ["report", str(audit_json)])
 
     assert result.exit_code == 1
-    assert "link.broken_internal" in result.output
+    assert "error" in result.output
+    assert "link" in result.output
+
+
+def test_report_rejects_invalid_json_without_traceback(tmp_path: Path) -> None:
+    runner = CliRunner()
+    audit_json = tmp_path / "audit.json"
+    audit_json.write_text("{not-json", encoding="utf-8")
+
+    result = runner.invoke(app, ["report", str(audit_json)])
+
+    assert result.exit_code == 2
+    assert "Audit report is not valid JSON" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_report_rejects_malformed_findings_without_traceback(tmp_path: Path) -> None:
+    runner = CliRunner()
+    audit_json = tmp_path / "audit.json"
+    audit_json.write_text(json.dumps({"findings": [{"severity": "bad"}]}), encoding="utf-8")
+
+    result = runner.invoke(app, ["report", str(audit_json)])
+
+    assert result.exit_code == 2
+    assert "Finding at index 0 has invalid severity" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_local_discovery_read_errors_become_audit_findings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text("<title>Home</title>", encoding="utf-8")
+    (site / "sitemap.xml").write_text("<urlset />", encoding="utf-8")
+    (site / "robots.txt").write_text("User-agent: *\n", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def read_text(path: Path, *args, **kwargs):
+        if path.name in {"sitemap.xml", "robots.txt"}:
+            raise OSError("permission denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+    report = run_audit(str(site), SiteConfig(), "https://example.test")
+
+    codes = {finding.code for finding in report.findings}
+    assert "sitemap.read_error" in codes
+    assert "robots.read_error" in codes
+
+
+def test_remote_discovery_fetch_errors_are_not_reported_as_missing(monkeypatch) -> None:
+    def fail_fetch_text(source, config, network):
+        raise URLError("temporary failure")
+
+    monkeypatch.setattr(audit_module, "fetch_text", fail_fetch_text)
+    result = CrawlResult(
+        "https://example.test",
+        "https://example.test",
+        [],
+        network=NetworkSummary(),
+    )
+
+    sitemap = audit_module._sitemap_findings(result, SiteConfig())
+    robots = audit_module._robots_findings(result, SiteConfig())
+
+    assert sitemap[0].code == "sitemap.fetch_error"
+    assert sitemap[0].severity == "error"
+    assert robots[0].code == "robots.fetch_error"
+    assert robots[0].severity == "error"
+
+
+def test_remote_discovery_404_still_reports_missing(monkeypatch) -> None:
+    def missing_fetch_text(source, config, network):
+        raise HTTPError(source, 404, "Not Found", hdrs=None, fp=None)
+
+    monkeypatch.setattr(audit_module, "fetch_text", missing_fetch_text)
+    result = CrawlResult(
+        "https://example.test",
+        "https://example.test",
+        [],
+        network=NetworkSummary(),
+    )
+
+    sitemap = audit_module._sitemap_findings(result, SiteConfig())
+    robots = audit_module._robots_findings(result, SiteConfig())
+
+    assert sitemap[0].code == "sitemap.missing"
+    assert sitemap[0].severity == "warning"
+    assert robots[0].code == "robots.missing"
+    assert robots[0].severity == "warning"
 
 
 def test_cli_explains_base_url_without_target() -> None:

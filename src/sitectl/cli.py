@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated
 
@@ -187,8 +188,7 @@ def report(
     audit_json: Annotated[Path, typer.Argument(help="Audit JSON file produced by sitectl audit.")],
 ) -> None:
     """Render a terminal summary from audit JSON."""
-    data = json.loads(audit_json.read_text())
-    findings = [Finding(**finding) for finding in data.get("findings", [])]
+    findings = _load_report_findings(audit_json)
     print_findings(findings)
     raise typer.Exit(exit_code(findings))
 
@@ -253,6 +253,52 @@ def _read_source(source: str, config: SiteConfig, robots: bool = False) -> str:
     if source.startswith(("http://", "https://")):
         return fetch_text(source, config)
     return read_robots(source) if robots else read_sitemap(source)
+
+
+def _load_report_findings(audit_json: Path) -> list[Finding]:
+    try:
+        text = audit_json.read_text(encoding="utf-8")
+    except OSError as exc:
+        _report_input_error(f"Could not read audit report {audit_json}: {exc}")
+    try:
+        data = json.loads(text)
+    except JSONDecodeError as exc:
+        _report_input_error(f"Audit report is not valid JSON: {exc.msg} at line {exc.lineno}")
+    if not isinstance(data, dict):
+        _report_input_error("Audit report must be a JSON object.")
+    raw_findings = data.get("findings", [])
+    if not isinstance(raw_findings, list):
+        _report_input_error("Audit report field 'findings' must be a list.")
+    findings: list[Finding] = []
+    for index, raw in enumerate(raw_findings):
+        findings.append(_parse_report_finding(raw, index))
+    return findings
+
+
+def _parse_report_finding(raw: object, index: int) -> Finding:
+    if not isinstance(raw, dict):
+        _report_input_error(f"Finding at index {index} must be an object.")
+    severity = raw.get("severity")
+    code = raw.get("code")
+    message = raw.get("message")
+    location = raw.get("location")
+    evidence = raw.get("evidence")
+    if severity not in {"info", "warning", "error"}:
+        _report_input_error(f"Finding at index {index} has invalid severity.")
+    if not isinstance(code, str) or not code:
+        _report_input_error(f"Finding at index {index} must include a non-empty code.")
+    if not isinstance(message, str) or not message:
+        _report_input_error(f"Finding at index {index} must include a non-empty message.")
+    if location is not None and not isinstance(location, str):
+        _report_input_error(f"Finding at index {index} has invalid location.")
+    if evidence is not None and not isinstance(evidence, str):
+        _report_input_error(f"Finding at index {index} has invalid evidence.")
+    return Finding(severity, code, message, location, evidence)
+
+
+def _report_input_error(message: str) -> None:
+    typer.secho(message, fg=typer.colors.RED, err=True)
+    raise typer.Exit(2)
 
 
 def _require_target(target: str | None, base_url: str | None, command: str) -> str:
