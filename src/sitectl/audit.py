@@ -34,14 +34,15 @@ def run_audit(target: str, config: SiteConfig, base_url: str | None = None) -> A
 def _sitemap_findings(result: CrawlResult, config: SiteConfig) -> list[Finding]:
     location = _local_file(result, "sitemap.xml")
     if location and location.exists():
-        text = location.read_text(errors="replace")
         source = str(location)
+        text, error = _read_local_discovery(location, "sitemap")
+        if error:
+            return [error]
     elif result.base_url.startswith(("http://", "https://")) and not Path(result.target).exists():
         source = urljoin(result.base_url + "/", "sitemap.xml")
-        try:
-            text = fetch_text(source, config, result.network)
-        except (HTTPError, URLError, TimeoutError, OSError):
-            return [Finding("warning", "sitemap.missing", "No sitemap.xml was found.", source)]
+        text, error = _fetch_remote_discovery(source, config, result.network, "sitemap")
+        if error:
+            return [error]
     else:
         return [Finding("warning", "sitemap.missing", "No sitemap.xml was found.", result.target)]
 
@@ -68,14 +69,68 @@ def _sitemap_findings(result: CrawlResult, config: SiteConfig) -> list[Finding]:
 def _robots_findings(result: CrawlResult, config: SiteConfig) -> list[Finding]:
     location = _local_file(result, "robots.txt")
     if location and location.exists():
-        return validate_robots_text(location.read_text(errors="replace"), str(location))
+        text, error = _read_local_discovery(location, "robots")
+        if error:
+            return [error]
+        return validate_robots_text(text, str(location))
     if result.base_url.startswith(("http://", "https://")) and not Path(result.target).exists():
         source = urljoin(result.base_url + "/", "robots.txt")
-        try:
-            return validate_robots_text(fetch_text(source, config, result.network), source)
-        except (HTTPError, URLError, TimeoutError, OSError):
-            return [Finding("warning", "robots.missing", "No robots.txt was found.", source)]
+        text, error = _fetch_remote_discovery(source, config, result.network, "robots")
+        if error:
+            return [error]
+        return validate_robots_text(text, source)
     return [Finding("warning", "robots.missing", "No robots.txt was found.", result.target)]
+
+
+def _read_local_discovery(location: Path, kind: str) -> tuple[str, Finding | None]:
+    try:
+        return location.read_text(errors="replace"), None
+    except OSError as exc:
+        return "", Finding(
+            "error",
+            f"{kind}.read_error",
+            f"Could not read {location.name}.",
+            str(location),
+            str(exc),
+        )
+
+
+def _fetch_remote_discovery(
+    source: str,
+    config: SiteConfig,
+    network,
+    kind: str,
+) -> tuple[str, Finding | None]:
+    try:
+        return fetch_text(source, config, network), None
+    except HTTPError as exc:
+        if exc.code == 404:
+            return "", Finding("warning", f"{kind}.missing", _missing_message(kind), source)
+        return "", Finding(
+            "error",
+            f"{kind}.fetch_error",
+            _fetch_error_message(kind),
+            source,
+            f"HTTP {exc.code}: {getattr(exc, 'reason', exc.msg)}",
+        )
+    except (URLError, TimeoutError, OSError) as exc:
+        return "", Finding(
+            "error",
+            f"{kind}.fetch_error",
+            _fetch_error_message(kind),
+            source,
+            str(exc),
+        )
+
+
+def _missing_message(kind: str) -> str:
+    name = "robots.txt" if kind == "robots" else "sitemap.xml"
+    return f"No {name} was found."
+
+
+def _fetch_error_message(kind: str) -> str:
+    name = "robots.txt" if kind == "robots" else "sitemap.xml"
+    return f"Could not fetch {name}."
 
 
 def _local_file(result: CrawlResult, name: str) -> Path | None:
